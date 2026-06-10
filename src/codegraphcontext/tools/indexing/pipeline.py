@@ -52,52 +52,71 @@ async def run_tree_sitter_index_async(
     resolved_repo_path_str = str(path.resolve()) if path.is_dir() else str(path.parent.resolve())
 
     processed_count = 0
-    concurrency_limit = 10
+    concurrency_limit = 100  # We can increase the semaphore because the executor manages CPU limits
     semaphore = asyncio.Semaphore(concurrency_limit)
     
-    async def process_file(file: Path) -> Optional[Dict[str, Any]]:
-        nonlocal processed_count
-        async with semaphore:
-            if not file.is_file():
-                return None
-            
-            if job_id:
-                job_manager.update_job(job_id, current_file=str(file))
-            
-            repo_path = path.resolve() if path.is_dir() else file.parent.resolve()
-            
-            try:
-                # 1. Parse file (CPU bound, run in thread)
-                file_data = await asyncio.to_thread(parse_file, repo_path, file, is_dependency)
-                
-                # 2. Write to graph (I/O bound, run in thread)
-                if "error" not in file_data:
-                    await asyncio.to_thread(
-                        writer.add_file_to_graph, 
-                        file_data, repo_name, imports_map, 
-                        repo_path_str=resolved_repo_path_str
-                    )
-                    return file_data
-                elif not file_data.get("unsupported"):
-                    await asyncio.to_thread(add_minimal_file_node, file, repo_path, is_dependency)
-            except Exception as e:
-                error_logger(f"Error indexing file {file}: {e}")
-            
-            return None
+    import multiprocessing
+    from concurrent.futures import ProcessPoolExecutor
+    from ...cli.config_manager import get_config_value
+    from .worker import worker_parse_file
 
-    # Process all files in parallel with the semaphore limit
-    tasks = [process_file(f) for f in files]
-    for coro in asyncio.as_completed(tasks):
-        file_data = await coro
-        if file_data:
-            all_file_data.append(file_data)
-        
-        processed_count += 1
-        if job_id:
-            job_manager.update_job(job_id, processed_files=processed_count)
-        
-        if processed_count % 50 == 0:
-            info_logger(f"Processed {processed_count}/{len(files)} files...")
+    workers_cfg = get_config_value("CGC_PARSE_WORKERS")
+    if workers_cfg:
+        try:
+            max_workers = int(workers_cfg)
+        except ValueError:
+            max_workers = max(2, multiprocessing.cpu_count() - 1)
+    else:
+        max_workers = max(2, multiprocessing.cpu_count() - 1)
+
+    loop = asyncio.get_running_loop()
+
+    with ProcessPoolExecutor(max_workers=max_workers) as process_pool:
+        async def process_file(file: Path) -> Optional[Dict[str, Any]]:
+            nonlocal processed_count
+            async with semaphore:
+                if not file.is_file():
+                    return None
+                
+                if job_id:
+                    job_manager.update_job(job_id, current_file=str(file))
+                
+                repo_path = path.resolve() if path.is_dir() else file.parent.resolve()
+                
+                try:
+                    # 1. Parse file (CPU bound, run in process pool)
+                    file_data = await loop.run_in_executor(
+                        process_pool, worker_parse_file, str(repo_path), str(file), is_dependency
+                    )
+                    
+                    # 2. Write to graph (I/O bound, run in thread)
+                    if "error" not in file_data:
+                        await asyncio.to_thread(
+                            writer.add_file_to_graph, 
+                            file_data, repo_name, imports_map, 
+                            repo_path_str=resolved_repo_path_str
+                        )
+                        return file_data
+                    elif not file_data.get("unsupported"):
+                        await asyncio.to_thread(add_minimal_file_node, file, repo_path, is_dependency)
+                except Exception as e:
+                    error_logger(f"Error indexing file {file}: {e}")
+                
+                return None
+
+        # Process all files in parallel with the semaphore limit
+        tasks = [process_file(f) for f in files]
+        for coro in asyncio.as_completed(tasks):
+            file_data = await coro
+            if file_data:
+                all_file_data.append(file_data)
+            
+            processed_count += 1
+            if job_id:
+                job_manager.update_job(job_id, processed_files=processed_count)
+            
+            if processed_count % 50 == 0:
+                info_logger(f"Processed {processed_count}/{len(files)} files...")
 
     info_logger(
         f"File processing complete. {len(all_file_data)} files parsed. "
