@@ -28,3 +28,53 @@ DEFAULT_IGNORE_PATTERNS = [
     "*.tar",
     "*.gz",
 ]
+
+# Parsers mapped by file extension
+PARSER_MAP = {
+    ".py": "python",
+    ".ipynb": "python",
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".mjs": "javascript",
+    ".cjs": "javascript",
+    ".go": "go",
+    ".ts": "typescript",
+    ".mts": "typescript",
+    ".cts": "typescript",
+    ".d.ts": "typescript",
+    ".tsx": "tsx",
+    ".cpp": "cpp",
+    ".h": "cpp",
+    ".hpp": "cpp",
+    ".hh": "cpp",
+    ".rs": "rust",
+    ".c": "c",
+    ".java": "java",
+    ".rb": "ruby",
+    ".cs": "c_sharp",
+    ".php": "php",
+    ".kt": "kotlin",
+    ".scala": "scala",
+    ".sc": "scala",
+    ".swift": "swift",
+    ".hs": "haskell",
+    ".dart": "dart",
+    ".pl": "perl",
+    ".pm": "perl",
+    ".lua": "lua",
+    ".ex": "elixir",
+    ".exs": "elixir",
+    ".el": "elisp",
+    ".html": "html",
+    ".css": "css",
+}
+
+# Generic extensions that shouldn't be parsed with Tree-sitter but still get File nodes
+GENERIC_EXTENSIONS = {
+    ".toml", ".sh", ".yaml", ".yml", ".json", ".ini", ".cfg", ".md", ".txt", ".env",
+    ".bat", ".ps1", ".dockerignore", ".gitignore"
+}
+
+GENERIC_FILENAMES = {
+    "Dockerfile", "Makefile"
+}

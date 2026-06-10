@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from ..core.database import DatabaseManager
 from ..core.jobs import JobManager, JobStatus
 from ..utils.debug_log import debug_log, error_logger, info_logger, warning_logger
-from .indexing.constants import DEFAULT_IGNORE_PATTERNS
+from .indexing.constants import DEFAULT_IGNORE_PATTERNS, PARSER_MAP, GENERIC_EXTENSIONS, GENERIC_FILENAMES
 from .indexing.persistence.writer import GraphWriter
 from .indexing.pipeline import run_tree_sitter_index_async
 from .indexing.pre_scan import pre_scan_for_imports
@@ -36,53 +36,11 @@ class GraphBuilder:
         self.driver = self.db_manager.get_driver()
         self._writer = GraphWriter(self.driver, db_manager=self.db_manager)
         self.last_call_resolution_diagnostics: list[Dict[str, Any]] = []
-        self.parsers = {
-            ".py": "python",
-            ".ipynb": "python",
-            ".js": "javascript",
-            ".jsx": "javascript",
-            ".mjs": "javascript",
-            ".cjs": "javascript",
-            ".go": "go",
-            ".ts": "typescript",
-            ".mts": "typescript",
-            ".cts": "typescript",
-            ".d.ts": "typescript",
-            ".tsx": "tsx",
-            ".cpp": "cpp",
-            ".h": "cpp",
-            ".hpp": "cpp",
-            ".hh": "cpp",
-            ".rs": "rust",
-            ".c": "c",
-            ".java": "java",
-            ".rb": "ruby",
-            ".cs": "c_sharp",
-            ".php": "php",
-            ".kt": "kotlin",
-            ".scala": "scala",
-            ".sc": "scala",
-            ".swift": "swift",
-            ".hs": "haskell",
-            ".dart": "dart",
-            ".pl": "perl",
-            ".pm": "perl",
-            ".lua": "lua",
-            ".ex": "elixir",
-            ".exs": "elixir",
-            ".el": "elisp",
-            ".html": "html",
-            ".css": "css",
-        }
+        self.parsers = PARSER_MAP
         
         # Files that should be added to the graph as minimal File nodes, even if not parsed
-        self.generic_extensions = {
-            ".toml", ".sh", ".yaml", ".yml", ".json", ".ini", ".cfg", ".md", ".txt", ".env",
-            ".bat", ".ps1", ".dockerignore", ".gitignore"
-        }
-        self.generic_filenames = {
-            "Dockerfile", "Makefile"
-        }
+        self.generic_extensions = GENERIC_EXTENSIONS
+        self.generic_filenames = GENERIC_FILENAMES
         
         import threading
         self._parsed_cache = threading.local()

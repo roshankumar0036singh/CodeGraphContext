@@ -3,53 +3,8 @@ from typing import Dict, Any, Optional
 
 from codegraphcontext.cli.config_manager import get_config_value
 from codegraphcontext.tools.tree_sitter_parser import TreeSitterParser
-
-# Parsers mapped by file extension
-_PARSER_MAP = {
-    ".py": "python",
-    ".ipynb": "python",
-    ".js": "javascript",
-    ".jsx": "javascript",
-    ".mjs": "javascript",
-    ".cjs": "javascript",
-    ".go": "go",
-    ".ts": "typescript",
-    ".mts": "typescript",
-    ".cts": "typescript",
-    ".d.ts": "typescript",
-    ".tsx": "tsx",
-    ".cpp": "cpp",
-    ".h": "cpp",
-    ".hpp": "cpp",
-    ".hh": "cpp",
-    ".rs": "rust",
-    ".c": "c",
-    ".java": "java",
-    ".rb": "ruby",
-    ".cs": "c_sharp",
-    ".php": "php",
-    ".kt": "kotlin",
-    ".scala": "scala",
-    ".sc": "scala",
-    ".swift": "swift",
-    ".hs": "haskell",
-    ".dart": "dart",
-    ".pl": "perl",
-    ".pm": "perl",
-    ".lua": "lua",
-    ".ex": "elixir",
-    ".exs": "elixir",
-    ".el": "elisp",
-    ".html": "html",
-    ".css": "css",
-}
-
-# Generic extensions that shouldn't be parsed with Tree-sitter but still get File nodes
-_GENERIC_EXTS = {
-    ".toml", ".sh", ".yaml", ".yml", ".json", ".ini", ".cfg", ".md", ".txt", ".env",
-    ".bat", ".ps1", ".dockerignore", ".gitignore"
-}
-_GENERIC_NAMES = {"Dockerfile", "Makefile"}
+from codegraphcontext.utils.debug_log import error_logger
+from codegraphcontext.tools.indexing.constants import PARSER_MAP, GENERIC_EXTENSIONS, GENERIC_FILENAMES
 
 # Cache to store instantiated parsers within the current worker process
 _PROCESS_PARSER_CACHE: Dict[str, TreeSitterParser] = {}
@@ -57,14 +12,15 @@ _PROCESS_PARSER_CACHE: Dict[str, TreeSitterParser] = {}
 
 def get_parser_in_worker(ext: str) -> Optional[TreeSitterParser]:
     """Retrieves or instantiates a TreeSitterParser per process."""
-    lang_name = _PARSER_MAP.get(ext)
+    lang_name = PARSER_MAP.get(ext)
     if not lang_name:
         return None
 
     if lang_name not in _PROCESS_PARSER_CACHE:
         try:
             _PROCESS_PARSER_CACHE[lang_name] = TreeSitterParser(lang_name)
-        except Exception:
+        except Exception as e:
+            error_logger(f"Failed to instantiate parser for {lang_name} ({ext}): {e}")
             return None
     return _PROCESS_PARSER_CACHE[lang_name]
 
@@ -82,7 +38,7 @@ def worker_parse_file(repo_path_str: str, file_path_str: str, is_dependency: boo
         ext = ".d.ts"
 
     # Handle unparsed but known files
-    if ext in _GENERIC_EXTS or path.name in _GENERIC_NAMES:
+    if ext in GENERIC_EXTENSIONS or path.name in GENERIC_FILENAMES:
         return {"path": str(path), "error": f"Generic file type {ext or path.name}", "unsupported": False}
 
     parser = get_parser_in_worker(ext)

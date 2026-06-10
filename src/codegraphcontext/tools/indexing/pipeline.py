@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 import asyncio
+import multiprocessing
 import time
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from ...cli.config_manager import get_config_value
 from ...core.jobs import JobManager, JobStatus
 from ...utils.debug_log import debug_log, error_logger, info_logger
 from .discovery import discover_files_to_index
@@ -16,6 +19,7 @@ from .persistence.writer import GraphWriter
 from .pre_scan import pre_scan_for_imports
 from .resolution.calls import build_function_call_groups
 from .resolution.inheritance import build_inheritance_and_csharp_files
+from .worker import worker_parse_file
 
 
 async def run_tree_sitter_index_async(
@@ -52,26 +56,16 @@ async def run_tree_sitter_index_async(
     resolved_repo_path_str = str(path.resolve()) if path.is_dir() else str(path.parent.resolve())
 
     processed_count = 0
-    concurrency_limit = 100  # We can increase the semaphore because the executor manages CPU limits
-    semaphore = asyncio.Semaphore(concurrency_limit)
-    
-    import multiprocessing
-    from concurrent.futures import ProcessPoolExecutor
-    from ...cli.config_manager import get_config_value
-    from .worker import worker_parse_file
 
     workers_cfg = get_config_value("CGC_PARSE_WORKERS")
-    if workers_cfg:
-        try:
-            max_workers = int(workers_cfg)
-        except ValueError:
-            max_workers = max(2, multiprocessing.cpu_count() - 1)
-    else:
-        max_workers = max(2, multiprocessing.cpu_count() - 1)
+    max_workers = int(workers_cfg) if workers_cfg and workers_cfg.isdigit() else max(2, multiprocessing.cpu_count() - 1)
 
+    concurrency_limit = max_workers * 4
+    semaphore = asyncio.Semaphore(concurrency_limit)
+    
     loop = asyncio.get_running_loop()
 
-    with ProcessPoolExecutor(max_workers=max_workers) as process_pool:
+    with ProcessPoolExecutor(max_workers=max_workers, mp_context=multiprocessing.get_context("spawn")) as process_pool:
         async def process_file(file: Path) -> Optional[Dict[str, Any]]:
             nonlocal processed_count
             async with semaphore:
@@ -107,9 +101,14 @@ async def run_tree_sitter_index_async(
         # Process all files in parallel with the semaphore limit
         tasks = [process_file(f) for f in files]
         for coro in asyncio.as_completed(tasks):
-            file_data = await coro
-            if file_data:
-                all_file_data.append(file_data)
+            try:
+                file_data = await coro
+                if file_data:
+                    all_file_data.append(file_data)
+            except Exception as e:
+                error_logger(f"Unhandled exception in file processing loop: {e}")
+                if job_id:
+                    job_manager.update_job(job_id, status_message=f"Error: {str(e)}")
             
             processed_count += 1
             if job_id:
